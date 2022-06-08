@@ -1,0 +1,7 @@
+.tox
+.venv
+*.egg-info
+
+# Sphinx
+docs/api
+docs/_build
