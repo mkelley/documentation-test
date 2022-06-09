@@ -15,7 +15,7 @@ technical results by the Collaboration.
    :maxdepth: 1
    :caption: Notebooks:
 
-   notebooks/*
+   notebooks/*/*
 
 Indices and tables
 ==================

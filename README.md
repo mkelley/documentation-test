@@ -9,18 +9,18 @@ your ipynb there.
 
 ## Building the pages
 
-Requires pandoc and a few python packages.  Install pandoc on your own, e.g.,
-with apt or brew.
+Requires `pandoc`, may be conveniently built with `tox`.  Install `pandoc` on
+your own, e.g., with `apt` or `brew`.
 
 ```
-apt install pandoc
-pip install -r requirements.txt
+apt install pandoc  # or install another way
+pip install tox
 ```
 
 Build:
 
 ```
-sphinx-build -W -b html . _build/html
+tox -e build_docs
 ```
 
 Then the documentation is found in `docs/_build/html`.
