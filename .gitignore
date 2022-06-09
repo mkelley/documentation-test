@@ -1,3 +1,4 @@
+.vscode
 .tox
 .venv
 *.egg-info
@@ -5,3 +6,7 @@
 # Sphinx
 docs/api
 docs/_build
+docs/notebooks
+
+notebooks/*/*
+!notebooks/*/*ipynb

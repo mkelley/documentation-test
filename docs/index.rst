@@ -10,23 +10,15 @@ The goal of this site is to document and make discoverable tutorials,
 background, code snippets, examples, key webpages, analysis, and any other
 technical results by the Collaboration.
 
-Analysis examples
------------------
-
-Plot examples
--------------
-
-
-
-
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :glob:
+   :maxdepth: 1
+   :caption: Notebooks:
 
+   notebooks/*/*
 
 Indices and tables
 ==================
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
