@@ -5,6 +5,8 @@ References: Table definitions are in the `Data Products Definition
 Document <https://ls.st/dpdd>`__ … but at the time of the SSSC Sprint
 2022, the simulated data products were not fully filled out.
 
+Author: Mike Kelley
+
 .. code:: ipython3
 
     import psycopg2 as pg
