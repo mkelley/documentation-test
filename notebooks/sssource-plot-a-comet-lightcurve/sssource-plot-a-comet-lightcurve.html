@@ -1,0 +1,511 @@
+
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+    <title>Plot a comet lightcurve from sssource &#8212; LSST SSSC Technical Documentation  documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css" />
+    <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="prev" title="Welcome to LSST SSSC Technical Documentation!" href="../../index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="plot-a-comet-lightcurve-from-sssource">
+<h1>Plot a comet lightcurve from <code class="docutils literal notranslate"><span class="pre">sssource</span></code><a class="headerlink" href="#plot-a-comet-lightcurve-from-sssource" title="Permalink to this heading">¶</a></h1>
+<p>References: Table definitions are in the <a class="reference external" href="https://ls.st/dpdd">Data Products Definition
+Document</a> … but at the time of the SSSC Sprint
+2022, the simulated data products were not fully filled out.</p>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">psycopg2</span> <span class="k">as</span> <span class="nn">pg</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+
+<span class="kn">from</span> <span class="nn">astropy.time</span> <span class="kn">import</span> <span class="n">Time</span>
+<span class="kn">import</span> <span class="nn">astropy.units</span> <span class="k">as</span> <span class="nn">u</span>
+<span class="kn">from</span> <span class="nn">sbpy.activity</span> <span class="kn">import</span> <span class="n">Afrho</span>
+<span class="kn">from</span> <span class="nn">sbpy.data</span> <span class="kn">import</span> <span class="n">Ephem</span>
+</pre></div>
+</div>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">pwd</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="s2">&quot;/home/shared/sssc-db-pass.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="n">con</span> <span class="o">=</span> <span class="n">pg</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">database</span><span class="o">=</span><span class="s2">&quot;lsst_solsys&quot;</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="s2">&quot;sssc&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="n">pwd</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="s2">&quot;epyc.astro.washington.edu&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="s2">&quot;5432&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># define what orbit constitutes a cometary orbit</span>
+<span class="n">comet_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;T_J_max&#39;</span><span class="p">:</span> <span class="mf">2.95</span><span class="p">,</span>  <span class="c1"># Tisserand no larger than this</span>
+                <span class="s1">&#39;e_min&#39;</span><span class="p">:</span> <span class="mf">0.98</span><span class="p">}</span>    <span class="c1"># Eccentricity no smaller than this</span>
+</pre></div>
+</div>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># find a &quot;comet&quot;</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_sql</span><span class="p">(</span>
+    <span class="sd">&quot;&quot;&quot;SELECT * FROM mpcorb</span>
+<span class="sd">       INNER JOIN ssobjects ON (ssobjects.ssobjectid = mpcorb.ssobjectid)</span>
+<span class="sd">       WHERE mpcorb.e &gt; %(e_min)s</span>
+<span class="sd">          OR (5.204 / (mpcorb.q / (1 - mpcorb.e)) + 2 * COS(RADIANS(mpcorb.incl)) * SQRT((mpcorb.q / (1 - mpcorb.e)) / 5.204 * (1 - mpcorb.e * mpcorb.e))) &lt; %(T_J_max)s</span>
+<span class="sd">       LIMIT 1&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">con</span><span class="p">,</span>
+    <span class="n">params</span><span class="o">=</span><span class="n">comet_params</span><span class="p">)</span>
+<span class="n">comet</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># get first row of result</span>
+<span class="n">comet</span>
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">opt</span><span class="o">/</span><span class="n">conda</span><span class="o">/</span><span class="n">envs</span><span class="o">/</span><span class="n">rubin</span><span class="o">-</span><span class="n">sims</span><span class="o">-</span><span class="n">v0</span><span class="mf">.9.0</span><span class="o">/</span><span class="n">lib</span><span class="o">/</span><span class="n">python3</span><span class="mf">.9</span><span class="o">/</span><span class="n">site</span><span class="o">-</span><span class="n">packages</span><span class="o">/</span><span class="n">pandas</span><span class="o">/</span><span class="n">io</span><span class="o">/</span><span class="n">sql</span><span class="o">.</span><span class="n">py</span><span class="p">:</span><span class="mi">761</span><span class="p">:</span> <span class="ne">UserWarning</span><span class="p">:</span> <span class="n">pandas</span> <span class="n">only</span> <span class="n">support</span> <span class="n">SQLAlchemy</span> <span class="n">connectable</span><span class="p">(</span><span class="n">engine</span><span class="o">/</span><span class="n">connection</span><span class="p">)</span> <span class="n">ordatabase</span> <span class="n">string</span> <span class="n">URI</span> <span class="ow">or</span> <span class="n">sqlite3</span> <span class="n">DBAPI2</span> <span class="n">connectionother</span> <span class="n">DBAPI2</span> <span class="n">objects</span> <span class="n">are</span> <span class="ow">not</span> <span class="n">tested</span><span class="p">,</span> <span class="n">please</span> <span class="n">consider</span> <span class="n">using</span> <span class="n">SQLAlchemy</span>
+  <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">mpcdesignation</span>           <span class="n">S0000002a</span>
+<span class="n">mpcnumber</span>                               <span class="mi">0</span>
+<span class="n">ssobjectid</span>            <span class="mi">8447890486452875146</span>
+<span class="n">mpch</span>                               <span class="mf">10.818</span>
+<span class="n">mpcg</span>                                 <span class="mf">0.15</span>
+                             <span class="o">...</span>
+<span class="n">yndata</span>                                <span class="mi">121</span>
+<span class="n">maxextendedness</span>                       <span class="mf">0.0</span>
+<span class="n">minextendedness</span>                       <span class="mf">0.0</span>
+<span class="n">medianextendedness</span>                    <span class="mf">0.0</span>
+<span class="n">flags</span>                                   <span class="mi">0</span>
+<span class="n">Name</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">Length</span><span class="p">:</span> <span class="mi">82</span><span class="p">,</span> <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
+</pre></div>
+</div>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># get the photometry:</span>
+<span class="c1">#   select all columns in sssources</span>
+<span class="c1">#   combine columns from diasources where diasourceid matches</span>
+<span class="c1">#   but limit results to the ssobjectid of our comet</span>
+<span class="n">phot</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_sql</span><span class="p">(</span>
+    <span class="sd">&quot;&quot;&quot;SELECT * FROM sssources</span>
+<span class="sd">       INNER JOIN diasources ON (sssources.diasourceid = diasources.diasourceid)</span>
+<span class="sd">       WHERE sssources.ssobjectid=%(ssobjectid)s&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">con</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="n">comet</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+<span class="p">)</span>
+<span class="n">phot</span>
+</pre></div>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">/</span><span class="n">opt</span><span class="o">/</span><span class="n">conda</span><span class="o">/</span><span class="n">envs</span><span class="o">/</span><span class="n">rubin</span><span class="o">-</span><span class="n">sims</span><span class="o">-</span><span class="n">v0</span><span class="mf">.9.0</span><span class="o">/</span><span class="n">lib</span><span class="o">/</span><span class="n">python3</span><span class="mf">.9</span><span class="o">/</span><span class="n">site</span><span class="o">-</span><span class="n">packages</span><span class="o">/</span><span class="n">pandas</span><span class="o">/</span><span class="n">io</span><span class="o">/</span><span class="n">sql</span><span class="o">.</span><span class="n">py</span><span class="p">:</span><span class="mi">761</span><span class="p">:</span> <span class="ne">UserWarning</span><span class="p">:</span> <span class="n">pandas</span> <span class="n">only</span> <span class="n">support</span> <span class="n">SQLAlchemy</span> <span class="n">connectable</span><span class="p">(</span><span class="n">engine</span><span class="o">/</span><span class="n">connection</span><span class="p">)</span> <span class="n">ordatabase</span> <span class="n">string</span> <span class="n">URI</span> <span class="ow">or</span> <span class="n">sqlite3</span> <span class="n">DBAPI2</span> <span class="n">connectionother</span> <span class="n">DBAPI2</span> <span class="n">objects</span> <span class="n">are</span> <span class="ow">not</span> <span class="n">tested</span><span class="p">,</span> <span class="n">please</span> <span class="n">consider</span> <span class="n">using</span> <span class="n">SQLAlchemy</span>
+  <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+</pre></div>
+</div>
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>ssobjectid</th>
+      <th>diasourceid</th>
+      <th>mpcuniqueid</th>
+      <th>eclipticlambda</th>
+      <th>eclipticbeta</th>
+      <th>galacticl</th>
+      <th>galacticb</th>
+      <th>phaseangle</th>
+      <th>heliocentricdist</th>
+      <th>topocentricdist</th>
+      <th>...</th>
+      <th>declsigma</th>
+      <th>ra_decl_cov</th>
+      <th>snr</th>
+      <th>filter</th>
+      <th>mag</th>
+      <th>magsigma</th>
+      <th>_v</th>
+      <th>_magtrue</th>
+      <th>_ratrue</th>
+      <th>_dectrue</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>8447890486452875146</td>
+      <td>6587841883066085399</td>
+      <td>0</td>
+      <td>356.851153</td>
+      <td>-9.107452</td>
+      <td>87.580395</td>
+      <td>-69.084319</td>
+      <td>14.546751</td>
+      <td>3.807186</td>
+      <td>4.020755</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>285.768900</td>
+      <td>z</td>
+      <td>17.260214</td>
+      <td>0.003793</td>
+      <td>17.560200</td>
+      <td>17.262200</td>
+      <td>0.767115</td>
+      <td>-9.601787</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>8447890486452875146</td>
+      <td>-7159109279155723609</td>
+      <td>0</td>
+      <td>59.308329</td>
+      <td>-20.952154</td>
+      <td>191.588482</td>
+      <td>-36.273875</td>
+      <td>4.187695</td>
+      <td>5.123790</td>
+      <td>4.197462</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>216.541660</td>
+      <td>y</td>
+      <td>17.558233</td>
+      <td>0.005002</td>
+      <td>17.857492</td>
+      <td>17.554491</td>
+      <td>61.530780</td>
+      <td>-0.494978</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>8447890486452875146</td>
+      <td>-4873256491932764747</td>
+      <td>0</td>
+      <td>59.311096</td>
+      <td>-20.952397</td>
+      <td>191.589976</td>
+      <td>-36.271576</td>
+      <td>4.186626</td>
+      <td>5.123845</td>
+      <td>4.197483</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>195.382460</td>
+      <td>y</td>
+      <td>17.549963</td>
+      <td>0.005543</td>
+      <td>17.857466</td>
+      <td>17.554466</td>
+      <td>61.533365</td>
+      <td>-0.494686</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>8447890486452875146</td>
+      <td>1305559744654628332</td>
+      <td>0</td>
+      <td>60.777308</td>
+      <td>-21.022067</td>
+      <td>192.309727</td>
+      <td>-35.031886</td>
+      <td>3.955013</td>
+      <td>5.153281</td>
+      <td>4.219282</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>540.058200</td>
+      <td>g</td>
+      <td>18.168968</td>
+      <td>0.002009</td>
+      <td>17.868053</td>
+      <td>18.170053</td>
+      <td>62.888899</td>
+      <td>-0.291068</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>8447890486452875146</td>
+      <td>8397385236521954431</td>
+      <td>0</td>
+      <td>60.780459</td>
+      <td>-21.022114</td>
+      <td>192.311149</td>
+      <td>-35.029184</td>
+      <td>3.955291</td>
+      <td>5.153343</td>
+      <td>4.219349</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>135.950940</td>
+      <td>u</td>
+      <td>19.484653</td>
+      <td>0.007957</td>
+      <td>17.868130</td>
+      <td>19.482130</td>
+      <td>62.891785</td>
+      <td>-0.290542</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>554</th>
+      <td>8447890486452875146</td>
+      <td>-8365500290426860658</td>
+      <td>0</td>
+      <td>34.527426</td>
+      <td>-19.093226</td>
+      <td>175.458082</td>
+      <td>-56.962581</td>
+      <td>8.344400</td>
+      <td>6.276025</td>
+      <td>5.771223</td>
+      <td>...</td>
+      <td>0.000003</td>
+      <td>0.0</td>
+      <td>69.733864</td>
+      <td>y</td>
+      <td>18.868198</td>
+      <td>0.015459</td>
+      <td>19.190887</td>
+      <td>18.887888</td>
+      <td>38.601893</td>
+      <td>-4.994305</td>
+    </tr>
+    <tr>
+      <th>555</th>
+      <td>8447890486452875146</td>
+      <td>1801058191567595533</td>
+      <td>0</td>
+      <td>34.570614</td>
+      <td>-19.042110</td>
+      <td>175.406049</td>
+      <td>-56.903650</td>
+      <td>8.413429</td>
+      <td>6.275298</td>
+      <td>5.784518</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>85.718470</td>
+      <td>y</td>
+      <td>18.874094</td>
+      <td>0.012593</td>
+      <td>19.198600</td>
+      <td>18.895601</td>
+      <td>38.623722</td>
+      <td>-4.932613</td>
+    </tr>
+    <tr>
+      <th>556</th>
+      <td>8447890486452875146</td>
+      <td>-5207186459605150284</td>
+      <td>0</td>
+      <td>39.135911</td>
+      <td>-21.091318</td>
+      <td>181.754242</td>
+      <td>-53.806591</td>
+      <td>5.196970</td>
+      <td>6.077328</td>
+      <td>5.233632</td>
+      <td>...</td>
+      <td>0.000003</td>
+      <td>0.0</td>
+      <td>68.407200</td>
+      <td>u</td>
+      <td>20.357357</td>
+      <td>0.015757</td>
+      <td>18.761307</td>
+      <td>20.375305</td>
+      <td>43.361119</td>
+      <td>-5.504170</td>
+    </tr>
+    <tr>
+      <th>557</th>
+      <td>8447890486452875146</td>
+      <td>-1561380110165288203</td>
+      <td>0</td>
+      <td>38.500882</td>
+      <td>-20.928133</td>
+      <td>181.115598</td>
+      <td>-54.293918</td>
+      <td>5.775282</td>
+      <td>6.069448</td>
+      <td>5.264884</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>354.167180</td>
+      <td>r</td>
+      <td>18.627779</td>
+      <td>0.003061</td>
+      <td>18.800613</td>
+      <td>18.628614</td>
+      <td>42.744100</td>
+      <td>-5.533677</td>
+    </tr>
+    <tr>
+      <th>558</th>
+      <td>8447890486452875146</td>
+      <td>5393674587725488964</td>
+      <td>0</td>
+      <td>38.498826</td>
+      <td>-20.927539</td>
+      <td>181.113408</td>
+      <td>-54.295468</td>
+      <td>5.777224</td>
+      <td>6.069422</td>
+      <td>5.264998</td>
+      <td>...</td>
+      <td>0.000002</td>
+      <td>0.0</td>
+      <td>277.129180</td>
+      <td>i</td>
+      <td>18.507975</td>
+      <td>0.003911</td>
+      <td>18.800749</td>
+      <td>18.509748</td>
+      <td>42.742081</td>
+      <td>-5.533712</td>
+    </tr>
+  </tbody>
+</table>
+<p>559 rows × 49 columns</p>
+</div><div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># package ephemeris information into an sbpy object</span>
+<span class="n">eph</span> <span class="o">=</span> <span class="n">Ephem</span><span class="o">.</span><span class="n">from_dict</span><span class="p">({</span><span class="s1">&#39;rh&#39;</span><span class="p">:</span> <span class="n">phot</span><span class="p">[</span><span class="s1">&#39;heliocentricdist&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">au</span><span class="p">,</span>
+                       <span class="s1">&#39;delta&#39;</span><span class="p">:</span> <span class="n">phot</span><span class="p">[</span><span class="s1">&#39;topocentricdist&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">au</span><span class="p">,</span>
+                       <span class="s1">&#39;phase&#39;</span><span class="p">:</span> <span class="n">phot</span><span class="p">[</span><span class="s1">&#39;phaseangle&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">})</span>
+
+<span class="c1"># simulated diasources do not have aperture information, but we use this for now:</span>
+<span class="n">aper</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">arcsec</span>
+</pre></div>
+</div>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fig</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mf">4.5</span><span class="p">),</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<span class="n">ax</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">add_subplot</span><span class="p">(</span><span class="mi">111</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">filt</span> <span class="ow">in</span> <span class="s1">&#39;ugrizy&#39;</span><span class="p">:</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">phot</span><span class="p">[</span><span class="s1">&#39;filter&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">==</span> <span class="n">filt</span>
+    <span class="n">afrho</span> <span class="o">=</span> <span class="n">Afrho</span><span class="o">.</span><span class="n">from_fluxd</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;LSST </span><span class="si">{</span><span class="n">filt</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">phot</span><span class="p">[</span><span class="s1">&#39;mag&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">values</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">ABmag</span><span class="p">,</span> <span class="n">aper</span><span class="p">,</span> <span class="n">eph</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">phot</span><span class="p">[</span><span class="s1">&#39;heliocentricdist&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">afrho</span><span class="p">,</span> <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="n">filt</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">setp</span><span class="p">(</span><span class="n">ax</span><span class="p">,</span> <span class="n">xlabel</span><span class="o">=</span><span class="s1">&#39;rh (au)&#39;</span><span class="p">,</span> <span class="n">ylabel</span><span class="o">=</span><span class="sa">r</span><span class="s1">&#39;$A(\theta)f\rho$ (cm)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+<img alt="../../_images/sssource-plot-a-comet-lightcurve_7_0.png" src="../../_images/sssource-plot-a-comet-lightcurve_7_0.png" />
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">LSST SSSC Technical Documentation</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Notebooks:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Plot a comet lightcurve from <code class="docutils literal notranslate"><span class="pre">sssource</span></code></a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../../index.html" title="previous chapter">Welcome to LSST SSSC Technical Documentation!</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, LSST SSSC.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 5.0.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/notebooks/sssource-plot-a-comet-lightcurve/sssource-plot-a-comet-lightcurve.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,436 @@
+Plot a comet lightcurve from ``sssource``
+=========================================
+
+References: Table definitions are in the `Data Products Definition
+Document <https://ls.st/dpdd>`__ … but at the time of the SSSC Sprint
+2022, the simulated data products were not fully filled out.
+
+.. code:: ipython3
+
+    import psycopg2 as pg
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    from astropy.time import Time
+    import astropy.units as u
+    from sbpy.activity import Afrho
+    from sbpy.data import Ephem
+
+.. code:: ipython3
+
+    pwd = open("/home/shared/sssc-db-pass.txt").read()
+    con = pg.connect(database="lsst_solsys", user="sssc", password=pwd, host="epyc.astro.washington.edu", port="5432")
+
+.. code:: ipython3
+
+    # define what orbit constitutes a cometary orbit
+    comet_params = {'T_J_max': 2.95,  # Tisserand no larger than this
+                    'e_min': 0.98}    # Eccentricity no smaller than this
+
+.. code:: ipython3
+
+    # find a "comet"
+    df = pd.read_sql(
+        """SELECT * FROM mpcorb
+           INNER JOIN ssobjects ON (ssobjects.ssobjectid = mpcorb.ssobjectid)
+           WHERE mpcorb.e > %(e_min)s
+              OR (5.204 / (mpcorb.q / (1 - mpcorb.e)) + 2 * COS(RADIANS(mpcorb.incl)) * SQRT((mpcorb.q / (1 - mpcorb.e)) / 5.204 * (1 - mpcorb.e * mpcorb.e))) < %(T_J_max)s
+           LIMIT 1""",
+        con,
+        params=comet_params)
+    comet = df.iloc[0]  # get first row of result
+    comet
+
+
+.. parsed-literal::
+
+    /opt/conda/envs/rubin-sims-v0.9.0/lib/python3.9/site-packages/pandas/io/sql.py:761: UserWarning: pandas only support SQLAlchemy connectable(engine/connection) ordatabase string URI or sqlite3 DBAPI2 connectionother DBAPI2 objects are not tested, please consider using SQLAlchemy
+      warnings.warn(
+
+
+
+
+.. parsed-literal::
+
+    mpcdesignation           S0000002a       
+    mpcnumber                               0
+    ssobjectid            8447890486452875146
+    mpch                               10.818
+    mpcg                                 0.15
+                                 ...         
+    yndata                                121
+    maxextendedness                       0.0
+    minextendedness                       0.0
+    medianextendedness                    0.0
+    flags                                   0
+    Name: 0, Length: 82, dtype: object
+
+
+
+.. code:: ipython3
+
+    # get the photometry:
+    #   select all columns in sssources
+    #   combine columns from diasources where diasourceid matches
+    #   but limit results to the ssobjectid of our comet
+    phot = pd.read_sql(
+        """SELECT * FROM sssources
+           INNER JOIN diasources ON (sssources.diasourceid = diasources.diasourceid)
+           WHERE sssources.ssobjectid=%(ssobjectid)s""",
+        con, params=comet.to_dict()
+    )
+    phot
+
+
+.. parsed-literal::
+
+    /opt/conda/envs/rubin-sims-v0.9.0/lib/python3.9/site-packages/pandas/io/sql.py:761: UserWarning: pandas only support SQLAlchemy connectable(engine/connection) ordatabase string URI or sqlite3 DBAPI2 connectionother DBAPI2 objects are not tested, please consider using SQLAlchemy
+      warnings.warn(
+
+
+
+
+.. raw:: html
+
+    <div>
+    <style scoped>
+        .dataframe tbody tr th:only-of-type {
+            vertical-align: middle;
+        }
+    
+        .dataframe tbody tr th {
+            vertical-align: top;
+        }
+    
+        .dataframe thead th {
+            text-align: right;
+        }
+    </style>
+    <table border="1" class="dataframe">
+      <thead>
+        <tr style="text-align: right;">
+          <th></th>
+          <th>ssobjectid</th>
+          <th>diasourceid</th>
+          <th>mpcuniqueid</th>
+          <th>eclipticlambda</th>
+          <th>eclipticbeta</th>
+          <th>galacticl</th>
+          <th>galacticb</th>
+          <th>phaseangle</th>
+          <th>heliocentricdist</th>
+          <th>topocentricdist</th>
+          <th>...</th>
+          <th>declsigma</th>
+          <th>ra_decl_cov</th>
+          <th>snr</th>
+          <th>filter</th>
+          <th>mag</th>
+          <th>magsigma</th>
+          <th>_v</th>
+          <th>_magtrue</th>
+          <th>_ratrue</th>
+          <th>_dectrue</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>0</th>
+          <td>8447890486452875146</td>
+          <td>6587841883066085399</td>
+          <td>0</td>
+          <td>356.851153</td>
+          <td>-9.107452</td>
+          <td>87.580395</td>
+          <td>-69.084319</td>
+          <td>14.546751</td>
+          <td>3.807186</td>
+          <td>4.020755</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>285.768900</td>
+          <td>z</td>
+          <td>17.260214</td>
+          <td>0.003793</td>
+          <td>17.560200</td>
+          <td>17.262200</td>
+          <td>0.767115</td>
+          <td>-9.601787</td>
+        </tr>
+        <tr>
+          <th>1</th>
+          <td>8447890486452875146</td>
+          <td>-7159109279155723609</td>
+          <td>0</td>
+          <td>59.308329</td>
+          <td>-20.952154</td>
+          <td>191.588482</td>
+          <td>-36.273875</td>
+          <td>4.187695</td>
+          <td>5.123790</td>
+          <td>4.197462</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>216.541660</td>
+          <td>y</td>
+          <td>17.558233</td>
+          <td>0.005002</td>
+          <td>17.857492</td>
+          <td>17.554491</td>
+          <td>61.530780</td>
+          <td>-0.494978</td>
+        </tr>
+        <tr>
+          <th>2</th>
+          <td>8447890486452875146</td>
+          <td>-4873256491932764747</td>
+          <td>0</td>
+          <td>59.311096</td>
+          <td>-20.952397</td>
+          <td>191.589976</td>
+          <td>-36.271576</td>
+          <td>4.186626</td>
+          <td>5.123845</td>
+          <td>4.197483</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>195.382460</td>
+          <td>y</td>
+          <td>17.549963</td>
+          <td>0.005543</td>
+          <td>17.857466</td>
+          <td>17.554466</td>
+          <td>61.533365</td>
+          <td>-0.494686</td>
+        </tr>
+        <tr>
+          <th>3</th>
+          <td>8447890486452875146</td>
+          <td>1305559744654628332</td>
+          <td>0</td>
+          <td>60.777308</td>
+          <td>-21.022067</td>
+          <td>192.309727</td>
+          <td>-35.031886</td>
+          <td>3.955013</td>
+          <td>5.153281</td>
+          <td>4.219282</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>540.058200</td>
+          <td>g</td>
+          <td>18.168968</td>
+          <td>0.002009</td>
+          <td>17.868053</td>
+          <td>18.170053</td>
+          <td>62.888899</td>
+          <td>-0.291068</td>
+        </tr>
+        <tr>
+          <th>4</th>
+          <td>8447890486452875146</td>
+          <td>8397385236521954431</td>
+          <td>0</td>
+          <td>60.780459</td>
+          <td>-21.022114</td>
+          <td>192.311149</td>
+          <td>-35.029184</td>
+          <td>3.955291</td>
+          <td>5.153343</td>
+          <td>4.219349</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>135.950940</td>
+          <td>u</td>
+          <td>19.484653</td>
+          <td>0.007957</td>
+          <td>17.868130</td>
+          <td>19.482130</td>
+          <td>62.891785</td>
+          <td>-0.290542</td>
+        </tr>
+        <tr>
+          <th>...</th>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+          <td>...</td>
+        </tr>
+        <tr>
+          <th>554</th>
+          <td>8447890486452875146</td>
+          <td>-8365500290426860658</td>
+          <td>0</td>
+          <td>34.527426</td>
+          <td>-19.093226</td>
+          <td>175.458082</td>
+          <td>-56.962581</td>
+          <td>8.344400</td>
+          <td>6.276025</td>
+          <td>5.771223</td>
+          <td>...</td>
+          <td>0.000003</td>
+          <td>0.0</td>
+          <td>69.733864</td>
+          <td>y</td>
+          <td>18.868198</td>
+          <td>0.015459</td>
+          <td>19.190887</td>
+          <td>18.887888</td>
+          <td>38.601893</td>
+          <td>-4.994305</td>
+        </tr>
+        <tr>
+          <th>555</th>
+          <td>8447890486452875146</td>
+          <td>1801058191567595533</td>
+          <td>0</td>
+          <td>34.570614</td>
+          <td>-19.042110</td>
+          <td>175.406049</td>
+          <td>-56.903650</td>
+          <td>8.413429</td>
+          <td>6.275298</td>
+          <td>5.784518</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>85.718470</td>
+          <td>y</td>
+          <td>18.874094</td>
+          <td>0.012593</td>
+          <td>19.198600</td>
+          <td>18.895601</td>
+          <td>38.623722</td>
+          <td>-4.932613</td>
+        </tr>
+        <tr>
+          <th>556</th>
+          <td>8447890486452875146</td>
+          <td>-5207186459605150284</td>
+          <td>0</td>
+          <td>39.135911</td>
+          <td>-21.091318</td>
+          <td>181.754242</td>
+          <td>-53.806591</td>
+          <td>5.196970</td>
+          <td>6.077328</td>
+          <td>5.233632</td>
+          <td>...</td>
+          <td>0.000003</td>
+          <td>0.0</td>
+          <td>68.407200</td>
+          <td>u</td>
+          <td>20.357357</td>
+          <td>0.015757</td>
+          <td>18.761307</td>
+          <td>20.375305</td>
+          <td>43.361119</td>
+          <td>-5.504170</td>
+        </tr>
+        <tr>
+          <th>557</th>
+          <td>8447890486452875146</td>
+          <td>-1561380110165288203</td>
+          <td>0</td>
+          <td>38.500882</td>
+          <td>-20.928133</td>
+          <td>181.115598</td>
+          <td>-54.293918</td>
+          <td>5.775282</td>
+          <td>6.069448</td>
+          <td>5.264884</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>354.167180</td>
+          <td>r</td>
+          <td>18.627779</td>
+          <td>0.003061</td>
+          <td>18.800613</td>
+          <td>18.628614</td>
+          <td>42.744100</td>
+          <td>-5.533677</td>
+        </tr>
+        <tr>
+          <th>558</th>
+          <td>8447890486452875146</td>
+          <td>5393674587725488964</td>
+          <td>0</td>
+          <td>38.498826</td>
+          <td>-20.927539</td>
+          <td>181.113408</td>
+          <td>-54.295468</td>
+          <td>5.777224</td>
+          <td>6.069422</td>
+          <td>5.264998</td>
+          <td>...</td>
+          <td>0.000002</td>
+          <td>0.0</td>
+          <td>277.129180</td>
+          <td>i</td>
+          <td>18.507975</td>
+          <td>0.003911</td>
+          <td>18.800749</td>
+          <td>18.509748</td>
+          <td>42.742081</td>
+          <td>-5.533712</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>559 rows × 49 columns</p>
+    </div>
+
+
+
+.. code:: ipython3
+
+    # package ephemeris information into an sbpy object
+    eph = Ephem.from_dict({'rh': phot['heliocentricdist'].values * u.au,
+                           'delta': phot['topocentricdist'].values * u.au,
+                           'phase': phot['phaseangle'].values * u.deg})
+    
+    # simulated diasources do not have aperture information, but we use this for now:
+    aper = 2 * u.arcsec
+
+.. code:: ipython3
+
+    fig = plt.figure(1, (8, 4.5), dpi=300)
+    ax = fig.add_subplot(111)
+    
+    for filt in 'ugrizy':
+        i = phot['filter'].values == filt
+        afrho = Afrho.from_fluxd(f'LSST {filt}', phot['mag'][i].values * u.ABmag, aper, eph[i])
+        ax.scatter(phot['heliocentricdist'][i], afrho, marker='.', label=filt)
+    
+    plt.setp(ax, xlabel='rh (au)', ylabel=r'$A(\theta)f\rho$ (cm)')
+    plt.legend()
+    plt.show()
+
+
+
+.. image:: sssource-plot-a-comet-lightcurve_files/sssource-plot-a-comet-lightcurve_7_0.png
+
